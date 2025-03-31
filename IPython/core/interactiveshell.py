@@ -4088,10 +4088,10 @@ class CapturingTee(Tee):
 
     def __setattr__(self, name, value):
         """Delegate any other attribute assignment to the original stream."""
-        if name in self._original_attrs:
-            return setattr(self.ostream, name, value)
         if name in {'shell', 'channel', 'ostream', '_original_attrs', '_closed'}:
             return super().__setattr__(name, value)
+        if name in self._original_attrs:
+            return setattr(self.ostream, name, value)
         raise AttributeError(
             f"'{self.__class__.__name__}' object has no attribute '{name}'"
         )
