@@ -4021,7 +4021,13 @@ class InteractiveShell(SingletonConfigurable):
         pass
 
 
-class CapturingTee(Tee):
+try:
+    from ipykernel.iostream import OutStream
+except ImportError:
+    OutStream = Tee
+
+
+class CapturingTee(OutStream):
     def __init__(self, shell: InteractiveShell, channel="stdout"):
         """Initialize the CapturingTee to duplicate stdout to a dictionary.
 
