@@ -3040,15 +3040,15 @@ class InteractiveShell(SingletonConfigurable):
         result : :class:`ExecutionResult`
         """
         result = None
-        tee_out = CapturingTee(self, channel="stdout")
-        tee_err = CapturingTee(self, channel="stderr")
+        # tee_out = CapturingTee(self, channel="stdout")
+        # tee_err = CapturingTee(self, channel="stderr")
         try:
             result = self._run_cell(
                 raw_cell, store_history, silent, shell_futures, cell_id
             )
         finally:
-            tee_out.close()
-            tee_err.close()
+            # tee_out.close()
+            # tee_err.close()
             self.events.trigger('post_execute')
             if not silent:
                 self.events.trigger('post_run_cell', result)
