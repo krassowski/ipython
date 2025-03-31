@@ -4043,6 +4043,31 @@ class CapturingTee(Tee):
     def write(self, data):
         """Write data to both the original stdout and the capture dictionary."""
         self.ostream.write(data)  # Display in notebook
+        if any(
+            [
+                self.shell.display_pub.is_publishing,
+                self.shell.displayhook.is_active,
+                self.shell.showing_traceback,
+            ]
+        ):
+            return
+        if not data:
+            return
+        execution_count = self.shell.execution_count
+        output_stream = None
+        outputs_by_counter = self.shell.history_manager.outputs
+        output_type = "out_stream" if self.channel == "stdout" else "err_stream"
+        if execution_count in outputs_by_counter:
+            outputs = outputs_by_counter[execution_count]
+            if outputs[-1].output_type == output_type:
+                output_stream = outputs[-1]
+        if output_stream is None:
+            output_stream = HistoryOutput(
+                output_type=output_type, bundle={"stream": ""}
+            )
+            outputs_by_counter[execution_count].append(output_stream)
+
+        output_stream.bundle["stream"] += data  # Append to existing stream
 
     def flush(self):
         """Flush both streams."""
@@ -4057,6 +4082,14 @@ class CapturingTee(Tee):
         """Delegate any other attribute access to the original stream."""
         if name in self._original_attrs:
             return getattr(self.ostream, name)
+        raise AttributeError(
+            f"'{self.__class__.__name__}' object has no attribute '{name}'"
+        )
+
+    def __setattr__(self, name, value):
+        """Delegate any other attribute assignment to the original stream."""
+        if name in self._original_attrs:
+            return setattr(self.ostream, name, value)
         raise AttributeError(
             f"'{self.__class__.__name__}' object has no attribute '{name}'"
         )
