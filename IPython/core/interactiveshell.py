@@ -3041,14 +3041,14 @@ class InteractiveShell(SingletonConfigurable):
         """
         result = None
         tee_out = CapturingTee(self, channel="stdout")
-        # tee_err = CapturingTee(self, channel="stderr")
+        tee_err = CapturingTee(self, channel="stderr")
         try:
             result = self._run_cell(
                 raw_cell, store_history, silent, shell_futures, cell_id
             )
         finally:
             tee_out.close()
-            # tee_err.close()
+            tee_err.close()
             self.events.trigger('post_execute')
             if not silent:
                 self.events.trigger('post_run_cell', result)
@@ -4043,31 +4043,6 @@ class CapturingTee(Tee):
     def write(self, data):
         """Write data to both the original stdout and the capture dictionary."""
         self.ostream.write(data)  # Display in notebook
-        if any(
-            [
-                self.shell.display_pub.is_publishing,
-                self.shell.displayhook.is_active,
-                self.shell.showing_traceback,
-            ]
-        ):
-            return
-        if not data:
-            return
-        execution_count = self.shell.execution_count
-        output_stream = None
-        outputs_by_counter = self.shell.history_manager.outputs
-        output_type = "out_stream" if self.channel == "stdout" else "err_stream"
-        if execution_count in outputs_by_counter:
-            outputs = outputs_by_counter[execution_count]
-            if outputs[-1].output_type == output_type:
-                output_stream = outputs[-1]
-        if output_stream is None:
-            output_stream = HistoryOutput(
-                output_type=output_type, bundle={"stream": ""}
-            )
-            outputs_by_counter[execution_count].append(output_stream)
-
-        output_stream.bundle["stream"] += data  # Append to existing stream
 
     def flush(self):
         """Flush both streams."""
