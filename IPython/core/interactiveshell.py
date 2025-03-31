@@ -3049,6 +3049,7 @@ class InteractiveShell(SingletonConfigurable):
         finally:
             tee_out.close()
             tee_err.close()
+            del tee_out, tee_err
             self.events.trigger('post_execute')
             if not silent:
                 self.events.trigger('post_run_cell', result)
@@ -4088,7 +4089,7 @@ class CapturingTee(Tee):
 
     def __setattr__(self, name, value):
         """Delegate any other attribute assignment to the original stream."""
-        if name in {'shell', 'channel', 'ostream', '_original_attrs', '_closed'}:
+        if name in {"shell", "channel", "ostream", "_original_attrs", "_closed"}:
             return super().__setattr__(name, value)
         if name in self._original_attrs:
             return setattr(self.ostream, name, value)
