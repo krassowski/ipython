@@ -1443,6 +1443,18 @@ def test_script_streams_multibyte_unicode(capsys):
     assert captured.out == "€" * 1000
 
 
+def test_script_streams_multibyte_unicode_2():
+    ip = get_ipython()
+    from contextlib import redirect_stdout
+    # € in UTF-8 is encoded using 3 bytes
+    code = "print('€' * 1000, end='')"
+    import io
+    with redirect_stdout(io.StringIO()) as f:
+        ip.run_cell_magic("script", f"{sys.executable}", code)
+
+    assert f.getvalue() == "€" * 1000
+
+
 @magics_class
 class FooFoo(Magics):
     """class with both %foo and %%foo magics"""
