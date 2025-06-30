@@ -1437,7 +1437,7 @@ def test_script_streams_multibyte_unicode(capsys):
     ip = get_ipython()
     # € in UTF-8 is encoded using 3 bytes
     code = "print('€' * 1000, end='')"
-    ip.run_cell_magic("script", f"{sys.executable}", code)
+    ip.run_cell_magic("script", f"{sys.executable} -X utf8", code)
 
     captured = capsys.readouterr()
     assert captured.out == "€" * 1000
@@ -1450,7 +1450,7 @@ def test_script_streams_multibyte_unicode_2():
     code = "print('€' * 1000, end='')"
     import io
     with redirect_stdout(io.StringIO()) as f:
-        ip.run_cell_magic("script", f"{sys.executable}", code)
+        ip.run_cell_magic("script", f"{sys.executable} -X utf8", code)
 
     assert f.getvalue() == "€" * 1000
 
