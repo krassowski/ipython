@@ -3,6 +3,8 @@
 import os
 import sys
 import inspect
+import threading
+import queue
 from warnings import warn
 from typing import Union as UnionType, Optional
 
@@ -987,13 +989,31 @@ class TerminalInteractiveShell(InteractiveShell):
         self.init_term_title()
         self.keep_running = True
         self._set_formatter(self.autoformatter)
+        # Start a simple background worker to run cells sequentially.
+        # This allows the prompt to remain responsive and capture typeahead
+        # while a previous cell is executing.
+        self._cell_executing = False  # type: ignore[attr-defined] # Track if a cell is currently executing
+        self._exec_queue = queue.Queue()  # type: ignore[attr-defined]
+        self._exec_thread = threading.Thread(  # type: ignore[attr-defined]
+            target=self._execution_worker,
+            name="IPythonExecWorker",
+            daemon=True,
+        )
+        self._exec_thread.start()
 
     def ask_exit(self):
         self.keep_running = False
+        # Wake the execution worker so it can terminate promptly.
+        if hasattr(self, "_exec_queue"):
+            try:
+                self._exec_queue.put_nowait(None)  # type: ignore[attr-defined]
+            except Exception:
+                pass
 
     rl_next_input = None
 
     def interact(self):
+        # Keep the UI loop responsive; enqueue submitted code for background execution.
         self.keep_running = True
         while self.keep_running:
             print(self.separate_in, end='')
@@ -1004,10 +1024,100 @@ class TerminalInteractiveShell(InteractiveShell):
                 if (not self.confirm_exit) \
                         or self.ask_yes_no('Do you really want to exit ([y]/n)?','y','n'):
                     self.ask_exit()
-
             else:
                 if code:
-                    self.run_cell(code, store_history=True)
+                    # If a cell is still executing, reorder the on-screen input so output appears first.
+                    if self._cell_executing:  # type: ignore[attr-defined]
+                        # Clear the prompt/input we just showed.
+                        if not self.simple_prompt:
+                            try:
+                                num_lines = code.count('\n') + 1
+                                sys.stdout.write('\r')
+                                for _ in range(num_lines):
+                                    sys.stdout.write('\033[1A')  # cursor up
+                                    sys.stdout.write('\033[2K')  # clear line
+                                sys.stdout.flush()
+                            except Exception:
+                                pass
+                        # Wait for the previous cell to complete so its output is printed.
+                        try:
+                            self._exec_queue.join()  # type: ignore[attr-defined]
+                        except Exception:
+                            pass
+                        # Redisplay the prompt/input below the finished output.
+                        try:
+                            if not self.simple_prompt and self.pt_app:
+                                from prompt_toolkit.formatted_text import PygmentsTokens
+
+                                tokens = self.prompts.in_prompt_tokens()
+                                print_formatted_text(
+                                    PygmentsTokens(tokens),
+                                    end='',
+                                    style=self.pt_app.app.style,
+                                )
+                                lines = code.split('\n')
+                                print(lines[0])
+                                for i, line in enumerate(lines[1:], 1):
+                                    cont_tokens = self.prompts.continuation_prompt_tokens(
+                                        lineno=i
+                                    )
+                                    print_formatted_text(
+                                        PygmentsTokens(cont_tokens),
+                                        end='',
+                                        style=self.pt_app.app.style,
+                                    )
+                                    print(line)
+                                sys.stdout.flush()
+                            else:
+                                exec_count = self.execution_count
+                                print(f"In [{exec_count}]: ", end='')
+                                lines = code.split('\n')
+                                print(lines[0])
+                                for line in lines[1:]:
+                                    print(f"   ...: {line}")
+                                sys.stdout.flush()
+                        except Exception:
+                            pass
+
+                    # Non-blocking: enqueue the code to be executed by the worker thread.
+                    try:
+                        self._exec_queue.put(code)  # type: ignore[attr-defined]
+                    except Exception:
+                        # If the queue is unavailable for any reason, fall back to blocking run.
+                        self.run_cell(code, store_history=True)
+
+    def _execution_worker(self):
+        """Background worker that runs cells sequentially from a queue.
+
+        This keeps the main prompt responsive to capture typeahead and allow
+        users to continue typing (e.g., completions) while a cell executes.
+        """
+        while True:
+            try:
+                item = self._exec_queue.get()  # type: ignore[attr-defined]
+            except Exception:
+                break
+            if item is None:
+                # Sentinel to exit the worker.
+                break
+            code = item
+            try:
+                # Set flag to indicate a cell is executing
+                self._cell_executing = True  # type: ignore[attr-defined]
+                # Execute the cell; history is stored as usual.
+                self.run_cell(code, store_history=True)
+            except Exception:
+                # Ensure the worker keeps running even if a cell errors.
+                # The displayhook and traceback handling are managed by IPython.
+                pass
+            finally:
+                # Clear the flag before marking task done
+                self._cell_executing = False  # type: ignore[attr-defined]
+                # Mark task done when applicable.
+                try:
+                    self._exec_queue.task_done()  # type: ignore[attr-defined]
+                except Exception:
+                    pass
 
     def mainloop(self):
         # An extra layer of protection in case someone mashing Ctrl-C breaks
