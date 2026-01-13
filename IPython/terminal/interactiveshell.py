@@ -993,6 +993,7 @@ class TerminalInteractiveShell(InteractiveShell):
         import threading as _threading  # local import to avoid touching module imports
         import queue as _queue
 
+        self._cell_executing = False  # type: ignore[attr-defined] # Track if a cell is currently executing
         self._exec_queue = _queue.Queue()  # type: ignore[attr-defined]
         self._exec_thread = _threading.Thread(  # type: ignore[attr-defined]
             target=self._execution_worker,
@@ -1026,6 +1027,14 @@ class TerminalInteractiveShell(InteractiveShell):
                     self.ask_exit()
             else:
                 if code:
+                    # Wait for the previous cell to finish before queuing the next one.
+                    # This ensures outputs appear in the correct order and prompt numbers are correct.
+                    if self._cell_executing:  # type: ignore[attr-defined]
+                        try:
+                            self._exec_queue.join()  # type: ignore[attr-defined]
+                        except Exception:
+                            pass
+
                     # Non-blocking: enqueue the code to be executed by the worker thread.
                     try:
                         self._exec_queue.put(code)  # type: ignore[attr-defined]
@@ -1053,6 +1062,8 @@ class TerminalInteractiveShell(InteractiveShell):
                 break
             code = item
             try:
+                # Set flag to indicate a cell is executing
+                self._cell_executing = True  # type: ignore[attr-defined]
                 # Execute the cell; history is stored as usual.
                 self.run_cell(code, store_history=True)
             except Exception:
@@ -1060,6 +1071,8 @@ class TerminalInteractiveShell(InteractiveShell):
                 # The displayhook and traceback handling are managed by IPython.
                 pass
             finally:
+                # Clear the flag before marking task done
+                self._cell_executing = False  # type: ignore[attr-defined]
                 # Mark task done when applicable.
                 try:
                     if _queue is not None:

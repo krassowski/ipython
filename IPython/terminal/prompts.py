@@ -31,6 +31,11 @@ class Prompts:
         return 0
 
     def in_prompt_tokens(self):
+        # If a cell is currently executing in the background, show the next prompt number
+        # to indicate that this input will be executed after the current one completes.
+        exec_count = self.shell.execution_count
+        if getattr(self.shell, '_cell_executing', False):
+            exec_count += 1
         return [
             (Token.Prompt.Mode, self.vi_mode()),
             (
@@ -40,7 +45,7 @@ class Prompts:
                 ),
             ),
             (Token.Prompt, "In ["),
-            (Token.PromptNum, str(self.shell.execution_count)),
+            (Token.PromptNum, str(exec_count)),
             (Token.Prompt, ']: '),
         ]
 
