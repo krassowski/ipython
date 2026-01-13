@@ -987,13 +987,33 @@ class TerminalInteractiveShell(InteractiveShell):
         self.init_term_title()
         self.keep_running = True
         self._set_formatter(self.autoformatter)
+        # Start a simple background worker to run cells sequentially.
+        # This allows the prompt to remain responsive and capture typeahead
+        # while a previous cell is executing.
+        import threading as _threading  # local import to avoid touching module imports
+        import queue as _queue
+
+        self._exec_queue = _queue.Queue()  # type: ignore[attr-defined]
+        self._exec_thread = _threading.Thread(  # type: ignore[attr-defined]
+            target=self._execution_worker,
+            name="IPythonExecWorker",
+            daemon=True,
+        )
+        self._exec_thread.start()
 
     def ask_exit(self):
         self.keep_running = False
+        # Wake the execution worker so it can terminate promptly.
+        if hasattr(self, "_exec_queue"):
+            try:
+                self._exec_queue.put_nowait(None)  # type: ignore[attr-defined]
+            except Exception:
+                pass
 
     rl_next_input = None
 
     def interact(self):
+        # Keep the UI loop responsive; enqueue submitted code for background execution.
         self.keep_running = True
         while self.keep_running:
             print(self.separate_in, end='')
@@ -1004,10 +1024,48 @@ class TerminalInteractiveShell(InteractiveShell):
                 if (not self.confirm_exit) \
                         or self.ask_yes_no('Do you really want to exit ([y]/n)?','y','n'):
                     self.ask_exit()
-
             else:
                 if code:
-                    self.run_cell(code, store_history=True)
+                    # Non-blocking: enqueue the code to be executed by the worker thread.
+                    try:
+                        self._exec_queue.put(code)  # type: ignore[attr-defined]
+                    except Exception:
+                        # If the queue is unavailable for any reason, fall back to blocking run.
+                        self.run_cell(code, store_history=True)
+
+    def _execution_worker(self):
+        """Background worker that runs cells sequentially from a queue.
+
+        This keeps the main prompt responsive to capture typeahead and allow
+        users to continue typing (e.g., completions) while a cell executes.
+        """
+        try:
+            import queue as _queue
+        except Exception:
+            _queue = None
+        while True:
+            try:
+                item = self._exec_queue.get()  # type: ignore[attr-defined]
+            except Exception:
+                break
+            if item is None:
+                # Sentinel to exit the worker.
+                break
+            code = item
+            try:
+                # Execute the cell; history is stored as usual.
+                self.run_cell(code, store_history=True)
+            except Exception:
+                # Ensure the worker keeps running even if a cell errors.
+                # The displayhook and traceback handling are managed by IPython.
+                pass
+            finally:
+                # Mark task done when applicable.
+                try:
+                    if _queue is not None:
+                        self._exec_queue.task_done()  # type: ignore[attr-defined]
+                except Exception:
+                    pass
 
     def mainloop(self):
         # An extra layer of protection in case someone mashing Ctrl-C breaks
