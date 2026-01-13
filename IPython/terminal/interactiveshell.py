@@ -1027,11 +1027,56 @@ class TerminalInteractiveShell(InteractiveShell):
                     self.ask_exit()
             else:
                 if code:
-                    # Wait for the previous cell to finish before queuing the next one.
-                    # This ensures outputs appear in the correct order and prompt numbers are correct.
+                    # If a cell is still executing, reorder the on-screen input so output appears first.
                     if self._cell_executing:  # type: ignore[attr-defined]
+                        # Clear the prompt/input we just showed.
+                        if not self.simple_prompt:
+                            try:
+                                num_lines = code.count('\n') + 1
+                                sys.stdout.write('\r')
+                                for _ in range(num_lines):
+                                    sys.stdout.write('\033[1A')  # cursor up
+                                    sys.stdout.write('\033[2K')  # clear line
+                                sys.stdout.flush()
+                            except Exception:
+                                pass
+                        # Wait for the previous cell to complete so its output is printed.
                         try:
                             self._exec_queue.join()  # type: ignore[attr-defined]
+                        except Exception:
+                            pass
+                        # Redisplay the prompt/input below the finished output.
+                        try:
+                            if not self.simple_prompt and self.pt_app:
+                                from prompt_toolkit.formatted_text import PygmentsTokens
+
+                                tokens = self.prompts.in_prompt_tokens()
+                                print_formatted_text(
+                                    PygmentsTokens(tokens),
+                                    end='',
+                                    style=self.pt_app.app.style,
+                                )
+                                lines = code.split('\n')
+                                print(lines[0])
+                                for i, line in enumerate(lines[1:], 1):
+                                    cont_tokens = self.prompts.continuation_prompt_tokens(
+                                        lineno=i
+                                    )
+                                    print_formatted_text(
+                                        PygmentsTokens(cont_tokens),
+                                        end='',
+                                        style=self.pt_app.app.style,
+                                    )
+                                    print(line)
+                                sys.stdout.flush()
+                            else:
+                                exec_count = self.execution_count
+                                print(f"In [{exec_count}]: ", end='')
+                                lines = code.split('\n')
+                                print(lines[0])
+                                for line in lines[1:]:
+                                    print(f"   ...: {line}")
+                                sys.stdout.flush()
                         except Exception:
                             pass
 
